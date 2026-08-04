@@ -1,0 +1,5 @@
+venv/
+.env
+device_credentials.json
+__pycache__/
+*.pyc
