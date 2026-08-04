@@ -53,6 +53,24 @@ def api_request(method, path, retries=3, delay=2, **kwargs):
             print(f"  [attempt {attempt}/{retries}] HTTP {response.status_code} "
                   f"from {path}: {response.text[:300]}")
             last_error = RuntimeError(f"HTTP {response.status_code}: {response.text[:300]}")
+
+            if response.status_code == 429:
+                # A 429 here is a Dyson-side (often WAF-level) rate limit,
+                # not a transient blip - short retries just add to the count
+                # against the same limit. Honor Retry-After if given, else
+                # back off much longer than the generic error case.
+                retry_after = response.headers.get("Retry-After")
+                if retry_after and retry_after.isdigit():
+                    wait = int(retry_after)
+                else:
+                    wait = max(delay * attempt, 30) * attempt
+                if attempt < retries:
+                    print(f"  rate limited - waiting {wait}s before retrying "
+                          "(repeated 429s usually mean you need to stop and "
+                          "wait several minutes, not just retry)")
+                time.sleep(wait)
+                continue
+
             time.sleep(delay * attempt)
             continue
 
