@@ -38,7 +38,8 @@ def api_request(method, path, retries=3, delay=2, **kwargs):
 
         if response.status_code >= 400:
             print(f"  [attempt {attempt}/{retries}] HTTP {response.status_code} "
-                  f"from {path}: {response.text[:300]}")
+                  f"from {path}: {response.text[:300]!r}")
+            print(f"  response headers: {dict(response.headers)}")
             last_error = RuntimeError(f"HTTP {response.status_code}: {response.text[:300]}")
 
             if response.status_code == 429:
