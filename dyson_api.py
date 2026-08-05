@@ -8,13 +8,30 @@ most commonly a 429 rate limit rendered as an HTML block page - it blows up
 with an opaque requests.exceptions.JSONDecodeError instead of a useful error.
 This module retries and surfaces the real response body instead.
 """
+import os
 import sys
 import time
+from pathlib import Path
 
 import requests
 
 DYSON_API_HOST = "https://appapi.cp.dyson.com"
 DYSON_API_HEADERS = {"User-Agent": "android client"}
+
+
+def load_env(env_path=None):
+    """Minimal .env loader so we don't need python-dotenv as a dependency."""
+    env_path = env_path or Path(__file__).parent / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            os.environ.setdefault(key.strip(), value)
 
 
 def api_request(method, path, retries=3, delay=2, **kwargs):

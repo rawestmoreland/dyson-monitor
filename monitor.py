@@ -23,7 +23,7 @@ from pathlib import Path
 from libdyson.cloud.device_info import DysonDeviceInfo
 from libdyson import get_device
 
-from dyson_api import dyson_login, dyson_get_devices_raw
+from dyson_api import dyson_login, dyson_get_devices_raw, load_env
 
 CREDENTIALS_CACHE = Path(__file__).parent / "device_credentials.json"
 
@@ -38,21 +38,6 @@ def dyson_get_devices(auth_info):
             continue  # devices without local MQTT creds aren't supported here
         devices.append(DysonDeviceInfo.from_raw(raw))
     return devices
-
-
-def load_env():
-    """Minimal .env loader so we don't need python-dotenv as a dependency."""
-    env_path = Path(__file__).parent / ".env"
-    if env_path.exists():
-        for line in env_path.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            value = value.strip()
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-                value = value[1:-1]
-            os.environ.setdefault(key.strip(), value)
 
 
 def get_device_info():
