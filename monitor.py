@@ -20,115 +20,17 @@ import time
 from getpass import getpass
 from pathlib import Path
 
-import requests
 from libdyson.cloud.device_info import DysonDeviceInfo
 from libdyson import get_device
 
+from dyson_api import dyson_login, dyson_get_devices_raw, load_env
+
 CREDENTIALS_CACHE = Path(__file__).parent / "device_credentials.json"
-
-DYSON_API_HOST = "https://appapi.cp.dyson.com"
-DYSON_API_HEADERS = {"User-Agent": "android client"}
-
-
-def api_request(method, path, retries=3, delay=2, **kwargs):
-    """
-    Make a request to the Dyson API with retries and clear error output
-    on any non-JSON response, instead of letting requests/json blow up
-    with an opaque JSONDecodeError like the library does.
-    """
-    headers = {**DYSON_API_HEADERS, **kwargs.pop("headers", {})}
-    last_error = None
-    for attempt in range(1, retries + 1):
-        try:
-            response = requests.request(
-                method, DYSON_API_HOST + path, headers=headers, **kwargs
-            )
-        except requests.RequestException as e:
-            last_error = e
-            print(f"  [attempt {attempt}/{retries}] network error: {e}")
-            time.sleep(delay * attempt)
-            continue
-
-        if response.status_code >= 400:
-            print(f"  [attempt {attempt}/{retries}] HTTP {response.status_code} "
-                  f"from {path}: {response.text[:300]}")
-            last_error = RuntimeError(f"HTTP {response.status_code}: {response.text[:300]}")
-
-            if response.status_code == 429:
-                # A 429 here is a Dyson-side (often WAF-level) rate limit,
-                # not a transient blip - short retries just add to the count
-                # against the same limit. Honor Retry-After if given, else
-                # back off much longer than the generic error case.
-                retry_after = response.headers.get("Retry-After")
-                if retry_after and retry_after.isdigit():
-                    wait = int(retry_after)
-                else:
-                    wait = max(delay * attempt, 30) * attempt
-                if attempt < retries:
-                    print(f"  rate limited - waiting {wait}s before retrying "
-                          "(repeated 429s usually mean you need to stop and "
-                          "wait several minutes, not just retry)")
-                time.sleep(wait)
-                continue
-
-            time.sleep(delay * attempt)
-            continue
-
-        try:
-            return response.json()
-        except requests.exceptions.JSONDecodeError:
-            print(f"  [attempt {attempt}/{retries}] non-JSON response from {path}: "
-                  f"{response.text[:300]!r}")
-            last_error = RuntimeError(f"Non-JSON response from {path}: {response.text[:300]!r}")
-            time.sleep(delay * attempt)
-            continue
-
-    sys.exit(f"Giving up on {path} after {retries} attempts: {last_error}")
-
-
-def dyson_login(email, country, password):
-    """
-    Hand-rolled version of the login flow, since the library's version
-    doesn't retry or surface the actual response body when something
-    other than a clean 200+JSON comes back.
-    """
-    print("Provisioning API access...")
-    api_request("GET", "/v1/provisioningservice/application/Android/version")
-
-    print("Checking account status...")
-    status = api_request(
-        "POST", "/v3/userregistration/email/userstatus",
-        params={"country": country}, json={"email": email},
-    )
-    if status.get("accountStatus") != "ACTIVE":
-        sys.exit(f"Account status is not ACTIVE: {status}")
-
-    print("Requesting OTP email...")
-    challenge = api_request(
-        "POST", "/v3/userregistration/email/auth",
-        params={"country": country, "culture": "en-US"}, json={"email": email},
-    )
-    challenge_id = challenge["challengeId"]
-
-    otp = input("Enter the OTP emailed to you: ").strip()
-
-    print("Verifying OTP...")
-    auth_info = api_request(
-        "POST", "/v3/userregistration/email/verify",
-        json={
-            "email": email,
-            "password": password,
-            "challengeId": challenge_id,
-            "otpCode": otp,
-        },
-    )
-    return auth_info  # contains {"token": ..., "tokenType": "Bearer", ...}
 
 
 def dyson_get_devices(auth_info):
     """Fetch and parse the device list using the authenticated token."""
-    headers = {**DYSON_API_HEADERS, "Authorization": f"Bearer {auth_info['token']}"}
-    raw_devices = api_request("GET", "/v2/provisioningservice/manifest", headers=headers)
+    raw_devices = dyson_get_devices_raw(auth_info)
 
     devices = []
     for raw in raw_devices:
@@ -136,18 +38,6 @@ def dyson_get_devices(auth_info):
             continue  # devices without local MQTT creds aren't supported here
         devices.append(DysonDeviceInfo.from_raw(raw))
     return devices
-
-
-def load_env():
-    """Minimal .env loader so we don't need python-dotenv as a dependency."""
-    env_path = Path(__file__).parent / ".env"
-    if env_path.exists():
-        for line in env_path.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            os.environ.setdefault(key.strip(), value.strip())
 
 
 def get_device_info():
