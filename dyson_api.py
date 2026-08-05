@@ -52,6 +52,21 @@ def api_request(method, path, retries=3, delay=2, **kwargs):
                     wait = int(retry_after)
                 else:
                     wait = max(delay * attempt, 30) * attempt
+
+                if wait > 300:
+                    # A block measured in hours won't clear by sitting in
+                    # time.sleep() - bail out with a clear time to retry
+                    # instead of hanging the terminal.
+                    retry_at = time.strftime(
+                        "%Y-%m-%d %H:%M:%S %Z", time.localtime(time.time() + wait)
+                    )
+                    sys.exit(
+                        f"Rate limited on {path} for {wait}s (until ~{retry_at}). "
+                        "This is a WAF-level block, not a transient error - "
+                        "further requests now will likely extend it. Stop and "
+                        "try again after that time."
+                    )
+
                 if attempt < retries:
                     print(f"  rate limited - waiting {wait}s before retrying "
                           "(repeated 429s usually mean you need to stop and "
